@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"bufio"
+	pkgerr "github.com/pkg/errors"
 
 	"boot.dev/linko/internal/store"
 )
@@ -77,13 +78,28 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 }
 
 type closeFunc func() error
+
+type stackTracer interface {
+	error
+	StackTrace() pkgerr.StackTrace
+
+}
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
 		if !ok {
 			return a
 		}
-		return slog.String("error", fmt.Sprintf("%+v", err))
+
+		if stackError, ok := errors.AsType[stackTracer](err); ok {
+			return slog.GroupAttrs("error", slog.Attr{
+				Key: "message",
+				Value: slog.StringValue(stackError.Error()),
+			}, slog.Attr{
+				Key: "stack_trace",
+				Value: slog.StringValue(fmt.Sprintf("%+v", stackError.StackTrace())),
+			})
+		}
 	}
 	return a
 }
