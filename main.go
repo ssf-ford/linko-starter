@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	"io"
+	"errors"
 	"fmt"
 	"bufio"
 
@@ -33,10 +33,15 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		return 1
 	}
+	defer func() {
+		if err := closeFunc(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to close logger: %v\n", err)
+		}
+	}()
 
 	st, err := store.New(dataDir, logger)
 	if err != nil {
-		logger.Info(fmt.Sprintf("failed to create store: %v\n", err))
+		logger.Error(fmt.Sprintf("failed to create store: %v", err))
 		return 1
 	}
 	s := newServer(*st, httpPort, cancel, logger)
@@ -50,15 +55,15 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 	defer cancel()
 
 	if err := s.shutdown(shutdownCtx); err != nil {
-		logger.Info(fmt.Sprintf("failed to shutdown server: %v\n", err))
+		logger.Error(fmt.Sprintf("failed to shutdown server: %v", err))
 		return 1
 	}
 	if serverErr != nil {
-		logger.Info(fmt.Sprintf("server error: %v\n", serverErr))
+		logger.Error(fmt.Sprintf("server error: %v", serverErr))
 		return 1
 	}
 	if err := closeFunc(); err != nil {
-		logger.Info(fmt.Sprintf("failed to close logger: %v\n", err))
+		logger.Info(fmt.Sprintf("failed to close logger: %v", err))
 		return 1
 	}
 	return 0
@@ -67,25 +72,42 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 type closeFunc func() error
 
 func initializeLogger(logFilename string) (*slog.Logger, closeFunc, error) {
+	handlers := []slog.Handler{
+		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}),
+	}
+	closers := []closeFunc{}
+
 	if logFilename != "" {
 		file, err := os.OpenFile(logFilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open log file: %v", err)
 		}
 		buffer := bufio.NewWriterSize(file, 8192)
-	    multiWriter := io.MultiWriter(os.Stderr, buffer)
-	    return slog.New(slog.NewTextHandler(multiWriter, nil)), func() (error) { 
-			err := buffer.Flush()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to flush log file: %v", err)
+		close := func() error {
+			if err := buffer.Flush(); err != nil {
+				return fmt.Errorf("failed to flush log file: %w", err)
 			}
-			err = file.Close()
-			if err != nil {
-				return fmt.Errorf("failed to close log file: %v", err)
+			if err := file.Close(); err != nil {
+				return fmt.Errorf("failed to close log file: %w", err)
 			}
 			return nil
-		}, nil
+		}
+		handlers = append(handlers, slog.NewTextHandler(buffer, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		}))
+		closers = append(closers, close)
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, nil)), func() (error) { return nil }, nil
+	closer := func() error {
+		var errs []error
+		for _, close := range closers {
+			if err := close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	}
+	return slog.New(slog.NewMultiHandler(handlers...)), closer, nil
 }
 
