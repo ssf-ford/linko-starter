@@ -42,8 +42,7 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 	st, err := store.New(dataDir, logger)
 	if err != nil {
 		//logger.Error(fmt.Sprintf("failed to create store: %v", err))
-		logger.Error("failed to create store",
-			slog.String("error", err.Error()))
+		logger.Error("failed to create store", "error", err)
 		return 1
 	}
 	s := newServer(*st, httpPort, cancel, logger)
@@ -58,31 +57,43 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 
 	if err := s.shutdown(shutdownCtx); err != nil {
 		//logger.Error(fmt.Sprintf("failed to shutdown server: %v", err))
-		logger.Error("failed to shutdown server",
-			slog.String("error", err.Error()))
+		logger.Error("failed to shutdown server", "error", err)
+			
 		return 1
 	}
 	if serverErr != nil {
 		//logger.Error(fmt.Sprintf("server error: %v", serverErr))
-		logger.Error("server error",
-			slog.String("error", serverErr.Error()))
+		logger.Error("server error", "error", serverErr)
+			
 		return 1
 	}
 	if err := closeFunc(); err != nil {
 		//logger.Info(fmt.Sprintf("failed to close logger: %v", err))
-		logger.Info("failed to close logger",
-			slog.String("error", err.Error()))
+		logger.Info("failed to close logger", "error", err)
+
 		return 1
 	}
 	return 0
 }
 
 type closeFunc func() error
+func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == "error" {
+		err, ok := a.Value.Any().(error)
+		if !ok {
+			return a
+		}
+		return slog.String("error", fmt.Sprintf("%+v", err))
+	}
+	return a
+}
 
 func initializeLogger(logFilename string) (*slog.Logger, closeFunc, error) {
+
 	handlers := []slog.Handler{
 		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
+			ReplaceAttr: replaceAttr,
 		}),
 	}
 	closers := []closeFunc{}
@@ -104,6 +115,7 @@ func initializeLogger(logFilename string) (*slog.Logger, closeFunc, error) {
 		}
 		handlers = append(handlers, slog.NewJSONHandler(buffer, &slog.HandlerOptions{
 			Level: slog.LevelInfo,
+			ReplaceAttr: replaceAttr,
 		}))
 		closers = append(closers, close)
 	}
