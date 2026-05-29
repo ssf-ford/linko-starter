@@ -85,6 +85,29 @@ type stackTracer interface {
 	StackTrace() pkgerr.StackTrace
 
 }
+
+type multiError interface {
+	error
+	Unwrap() []error
+}
+
+func errorAttrs(err error) []slog.Attr {
+	attrs := []slog.Attr{
+		{
+			Key: "message",
+			Value: slog.StringValue(err.Error()),
+		},
+	}
+	attrs = append(attrs, linkoerr.Attrs(err)...)
+	if stackError, ok := errors.AsType[stackTracer](err); ok {
+		attrs = append(attrs, slog.Attr{
+			Key: "stack_trace",
+			Value: slog.StringValue(fmt.Sprintf("%+v", stackError.StackTrace())),
+		})
+	}
+	return attrs
+}
+
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
@@ -92,22 +115,15 @@ func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 			return a
 		}
 
-		attrs := []slog.Attr{
-			{
-				Key: "message",
-				Value: slog.StringValue(err.Error()),
-			},
+		if multiError, ok := errors.AsType[multiError](err); ok {
+		    multiErrorAttrs := []slog.Attr{}
+			for i, err := range multiError.Unwrap() {
+				multiErrorAttrs = append(multiErrorAttrs, slog.GroupAttrs(fmt.Sprintf("error_%d", i+1), errorAttrs(err)...))
+			}
+			return slog.GroupAttrs("errors", multiErrorAttrs...)
 		}
 
-		attrs = append(attrs, linkoerr.Attrs(err)...)
-
-		if stackError, ok := errors.AsType[stackTracer](err); ok {
-			attrs = append(attrs, slog.Attr{
-				Key: "stack_trace",
-				Value: slog.StringValue(fmt.Sprintf("%+v", stackError.StackTrace())),
-			})
-		}
-		return slog.GroupAttrs("error", attrs...)
+		return slog.GroupAttrs("error", errorAttrs(err)...)
 	}
 	return a
 }
