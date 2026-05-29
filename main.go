@@ -75,12 +75,6 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 			
 		return 1
 	}
-	if err := closeFunc(); err != nil {
-		//logger.Info(fmt.Sprintf("failed to close logger: %v", err))
-		logger.Info("failed to close logger", "error", err)
-
-		return 1
-	}
 	return 0
 }
 
