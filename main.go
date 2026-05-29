@@ -42,9 +42,16 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 		}
 	}()
 
+	env := os.Getenv("ENV")
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
 	logger = logger.With(
 		slog.String("git_sha", build.GitSHA),
 		slog.String("build_time", build.BuildTime),
+		slog.String("env", env),
+		slog.String("hostname", hostname),
 	)
 
 	st, err := store.New(dataDir, logger)
