@@ -22,6 +22,14 @@ type server struct {
 
 type LogContext struct {
 	Username string
+	Error    error
+}
+
+func httpError(ctx context.Context, w http.ResponseWriter, status int, err error) {
+	if logCtx, ok := ctx.Value(LogContextKey).(*LogContext); ok {
+		logCtx.Error = err
+	}
+	http.Error(w, err.Error(), status)
 }
 
 type spyReaderCloser struct {
@@ -82,6 +90,10 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			if username := logContext.Username; username != "" {
 				logAttrs = append(logAttrs, slog.String("user", username))
+			}
+
+			if err := logContext.Error; err != nil {
+				logAttrs = append(logAttrs, slog.Any("error", err))
 			}
 
 			logger.Info("Served request", logAttrs...)
