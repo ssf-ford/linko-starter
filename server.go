@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"io"
 	"log/slog"
+	"time"
 	"boot.dev/linko/internal/store"
 )
 
@@ -18,12 +20,58 @@ type server struct {
 	logger     *slog.Logger
 }
 
+type spyReaderCloser struct {
+	io.ReadCloser
+	bytesRead int
+}
+
+func (r *spyReaderCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	r.bytesRead += n
+	return n, err
+}
+
+type spyResponseWriter struct {
+	http.ResponseWriter
+	bytesWritten int
+	statusCode int
+}
+
+func (w *spyResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *spyResponseWriter) Write(p []byte) (int, error) {
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+
+	n, err := w.ResponseWriter.Write(p)
+	w.bytesWritten += n
+	return n, err
+}
+
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r)
+			spyReader := &spyReaderCloser{ReadCloser: r.Body}
+			r.Body = spyReader
+
+			spyWriter := &spyResponseWriter{ResponseWriter: w}
+
+			start := time.Now()
+			next.ServeHTTP(spyWriter, r)
 			//logger.Info(fmt.Sprintf("Served request: %s %s", r.Method, r.URL.Path))
-			logger.Info("Served request", "method", r.Method, "path", r.URL.Path, "client_ip", r.RemoteAddr)
+			logger.Info("Served request", 
+				"method", r.Method, 
+				"path", r.URL.Path, 
+				"client_ip", r.RemoteAddr, 
+				"duration", time.Since(start),
+				"request_body_bytes", spyReader.bytesRead,
+				"response_status", spyWriter.statusCode,
+				"response_body_bytes", spyWriter.bytesWritten,
+			)
 		})
 	}
 }
