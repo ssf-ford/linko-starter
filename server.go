@@ -2,14 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
-	"io"
-	"log/slog"
 	"time"
+
 	"boot.dev/linko/internal/store"
 )
 
@@ -96,7 +98,23 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 				logAttrs = append(logAttrs, slog.Any("error", err))
 			}
 
+			if requestId := r.Header.Get("X-Request-ID"); requestId != "" {
+				logAttrs = append(logAttrs, slog.String("request_id", requestId))
+			}
+
 			logger.Info("Served request", logAttrs...)
+		})
+	}
+}
+
+func requestIdHandler() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Request-ID") == "" {
+				r.Header.Set("X-Request-ID", rand.Text())
+			}
+			w.Header().Set("X-Request-ID", r.Header.Get("X-Request-ID"))
+			next.ServeHTTP(w, r)
 		})
 	}
 }
@@ -106,7 +124,7 @@ func newServer(store store.Store, port int, cancel context.CancelFunc, logger *s
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: requestLogger(logger)(mux),
+		Handler: requestIdHandler()(requestLogger(logger)(mux)),
 	}
 
 	s := &server{
