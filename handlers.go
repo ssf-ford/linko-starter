@@ -42,12 +42,12 @@ func (s *server) handlerShortenLink(w http.ResponseWriter, r *http.Request) {
 	}
 	longURL := r.FormValue("url")
 	if longURL == "" {
-		httpError(r.Context(), w,  http.StatusBadRequest, errors.New("missing url parameter"))
+		httpError(r.Context(), w, http.StatusBadRequest, errors.New("missing url parameter"))
 		return
 	}
 	u, err := url.Parse(longURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		httpError(r.Context(), w, http.StatusBadRequest, fmt.Errorf("invalid URL: must include scheme (http/https) and host: %w", err))
+		httpError(r.Context(), w, http.StatusBadRequest, fmt.Errorf("invalid URL: must include scheme (http/https) and host"))
 		return
 	}
 	if err := checkDestination(longURL); err != nil {
