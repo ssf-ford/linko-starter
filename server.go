@@ -31,7 +31,13 @@ func httpError(ctx context.Context, w http.ResponseWriter, status int, err error
 	if logCtx, ok := ctx.Value(LogContextKey).(*LogContext); ok {
 		logCtx.Error = err
 	}
-	http.Error(w, err.Error(), status)
+
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusInternalServerError:
+		http.Error(w, http.StatusText(status), status)
+	default:
+		http.Error(w, err.Error(), status)
+	}
 }
 
 type spyReaderCloser struct {
@@ -48,7 +54,7 @@ func (r *spyReaderCloser) Read(p []byte) (int, error) {
 type spyResponseWriter struct {
 	http.ResponseWriter
 	bytesWritten int
-	statusCode int
+	statusCode   int
 }
 
 func (w *spyResponseWriter) WriteHeader(statusCode int) {
@@ -80,7 +86,7 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			next.ServeHTTP(spyWriter, r)
 			//logger.Info(fmt.Sprintf("Served request: %s %s", r.Method, r.URL.Path))
-			logAttrs := []any {
+			logAttrs := []any{
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.String("client_ip", r.RemoteAddr),
