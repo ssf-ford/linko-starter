@@ -11,8 +11,10 @@ import (
 	pkgerr "github.com/pkg/errors"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -117,7 +119,22 @@ func errorAttrs(err error) []slog.Attr {
 	return attrs
 }
 
+var sensitiveKeys = []string{"user", "password", "key", "apikey", "secret", "pin", "creditcardno"}
+
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if slices.Contains(sensitiveKeys, a.Key) {
+		return slog.String(a.Key, "[REDACTED]")
+	}
+
+	if a.Value.Kind() == slog.KindString {
+		if u, err := url.Parse(a.Value.String()); err == nil {
+			if _, hasPassword := u.User.Password(); hasPassword {
+				u.User = url.UserPassword(u.User.Username(), "[REDACTED]")
+				return slog.String(a.Key, u.String())
+			}
+		}
+	}
+
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
 		if !ok {
@@ -134,6 +151,7 @@ func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 
 		return slog.GroupAttrs("error", errorAttrs(err)...)
 	}
+
 	return a
 }
 
