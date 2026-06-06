@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"errors"
+	"net/http"
 	//"log/slog"
 	"fmt"
 
-	"golang.org/x/crypto/bcrypt"
 	pkgerr "github.com/pkg/errors"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type contextKey string
@@ -36,11 +36,11 @@ func (s *server) authMiddleware(next http.Handler) http.Handler {
 			httpError(r.Context(), w, http.StatusUnauthorized, errors.New("unauthorized"))
 			return
 		}
-		ok, err := s.validatePassword(password, stored)
+		ok, err := s.validatePassword(r.Context(), password, stored)
 		if err != nil {
-				s.logger.Error("error validating password",
-					"user", username,
-					"error", err)
+			s.logger.Error("error validating password",
+				"user", username,
+				"error", err)
 			httpError(r.Context(), w, http.StatusInternalServerError, fmt.Errorf("internal server error: %w", err))
 			return
 		}
@@ -48,7 +48,7 @@ func (s *server) authMiddleware(next http.Handler) http.Handler {
 			httpError(r.Context(), w, http.StatusUnauthorized, errors.New("unauthorized"))
 			return
 		}
-		
+
 		if logCtx, ok := r.Context().Value(LogContextKey).(*LogContext); ok {
 			logCtx.Username = username
 		}
@@ -57,14 +57,16 @@ func (s *server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *server) validatePassword(password, stored string) (bool, error) {
+func (s *server) validatePassword(ctx context.Context, password, stored string) (bool, error) {
+	_, span := tracer.Start(ctx, "auth.validate_password")
+	defer span.End()
 	err := bcrypt.CompareHashAndPassword([]byte(stored), []byte(password))
 	if err == bcrypt.ErrMismatchedHashAndPassword {
 		return false, nil
 	}
 	if err != nil {
 		//s.logger.Error("error validating password",
-			//slog.String("error", err.Error()))
+		//slog.String("error", err.Error()))
 		return false, pkgerr.WithStack(err)
 	}
 	return true, nil
